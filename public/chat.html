@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <h1>Offline-First Chat</h1>
+
+    <ul id="messages"></ul>
+
+    <input id="msg" placeholder="Type message" />
+    <button id="sendBtn">Send</button>
+
+    <script>
+      function markMessageAsSent(id) {
+  const messages = getMessages();
+  const msg = messages.find((m) => m.id === id);
+  if (!msg) return;
+
+  msg.status = "sent";
+  saveMessages(messages);
+
+  const li = document.getElementById("msg-" + id);
+  if (li) {
+    li.textContent = msg.text + " ✓";
+  }
+}
+      /* =========================
+         LOCAL STORAGE HELPERS
+         ========================= */
+
+      function getMessages() {
+        return JSON.parse(localStorage.getItem("messages") || "[]");
+      }
+
+      function saveMessages(messages) {
+        localStorage.setItem("messages", JSON.stringify(messages));
+      }
+
+      /* =========================
+         UI RENDER FUNCTION
+         ========================= */
+
+      function renderMessage(message) {
+        const li = document.createElement("li");
+        li.id = "msg-" + message.id;
+        li.textContent =
+          message.text +
+          (message.status === "pending" ? " ⏳" : " ✓");
+        document.getElementById("messages").appendChild(li);
+      }
+
+      /* =========================
+         LOAD OLD MESSAGES
+         ========================= */
+
+      const oldMessages = getMessages();
+      oldMessages.forEach(renderMessage);
+
+      /* =========================
+         WEBSOCKET SETUP
+         ========================= */
+
+      const username = localStorage.getItem("username") || "test-user";
+      const socket = new WebSocket("ws://localhost:3000/ws");
+
+      socket.addEventListener("open", () => {
+        socket.send(
+          JSON.stringify({
+            type: "join",
+            name: username,
+          })
+        );
+      });
+
+     socket.addEventListener("message", (event) => {
+  const data = JSON.parse(event.data);
+
+  // message confirmation (for me)
+  markMessageAsSent(data.id);
+
+  // message from others (render if not mine)
+  const messages = getMessages();
+  const alreadyExists = messages.some((m) => m.id === data.id);
+
+  if (!alreadyExists) {
+    const incoming = {
+      id: data.id,
+      text: data.from + ": " + data.text,
+      status: "sent",
+    };
+
+    messages.push(incoming);
+    saveMessages(messages);
+    renderMessage(incoming);
+  }
+});
+
+
+      /* =========================
+         SEND MESSAGE (OFFLINE-FIRST)
+         ========================= */
+
+      document.getElementById("sendBtn").addEventListener("click", () => {
+        const input = document.getElementById("msg");
+        const text = input.value.trim();
+        if (!text) return;
+
+        const message = {
+          id: Date.now(),
+          text: text,
+          status: "pending",
+        };
+
+        // 1️⃣ Save locally
+        const messages = getMessages();
+        messages.push(message);
+        saveMessages(messages);
+
+        // 2️⃣ Render immediately
+        renderMessage(message);
+
+        // 3️⃣ Try sending if online
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: "chat",
+              text: message.text,
+              id: message.id,
+            })
+          );
+        }
+
+        input.value = "";
+      });
+    </script>
+  </body>
+</html>
